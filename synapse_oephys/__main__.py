@@ -17,10 +17,14 @@ def run():
     main(nodes, peripherals=[], defaults=defaults)
 
 async def test_zmq_client():
-    zmq_client = ZMQClient()
-    async for msg in zmq_client.receive_data():
-        print("received:", msg)
+    bs = BroadbandSource(69)
+    async for msg in bs.zmq_client.receive_data():
+        res = bs.parse_msg(msg)
+        print(f"channel: {res.samples[0][0]}, num_samples", len(res.samples[0][1]))
 
 if __name__ == "__main__":
     run()
-    # asyncio.run(test_zmq_client())
+    # try:
+    #     asyncio.run(test_zmq_client())
+    # except KeyboardInterrupt:
+    #     print("Shutting down...")

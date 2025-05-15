@@ -87,72 +87,10 @@ class ZMQClient:
             if self.data_socket in socks:
 
                 try:
-                    message = await self.data_socket.recv_multipart()
+                    yield await self.data_socket.recv_multipart()
                 except zmq.ZMQError as err:
                     print("got error: {0}".format(err))
                     break
-
-                if message:
-
-                    self.message_num += 1
-                    yield message
-
-                #     if len(message) < 2:
-                #         print("no frames for message: ", message[0])
-                #     try:
-                #         header = json.loads(message[1].decode('utf-8'))
-                #     except ValueError as e:
-                #         print("ValueError: ", e)
-                #         print(message[1])
-
-                #     if header['message_num'] != self.message_num:
-                #         print("Missed a message at number", self.message_num)
-
-                #     self.message_num = header['message_num']
-
-                #     if header['type'] == 'data':
-                #         c = header['content']
-                #         num_samples = c['num_samples']
-                #         channel_num = c['channel_num']
-                #         sample_rate = c['sample_rate']
-
-                #         if channel_num == 1:
-                #             try:
-                #                 n_arr = np.frombuffer(message[2],
-                #                                         dtype=np.float32)
-                #                 n_arr = np.reshape(n_arr, num_samples)
-
-                #                 if num_samples > 0:
-                #                     print(f"Received {num_samples} samples")
-
-                #             except IndexError as e:
-                #                 print(e)
-                #                 print(header)
-                #                 print(message[1])
-                #                 if len(message) > 2:
-                #                     print(len(message[2]))
-                #                 else:
-                #                     print("only one frame???")
-
-                #     elif header['type'] == 'event':
-                #         print("event type is not yet supported")
-                #         # if header['data_size'] > 0:
-                #         #     event = Event(header['content'],
-                #         #                             message[2])
-                #         # else:
-                #         #     event = Event(header['content'])
-
-                #         # print(event)
-
-                #     elif header['type'] == 'spike':
-                #         print("spike type is not yet supported")
-                #         # spike = Spike(header['spike'],
-                #         #                             message[2])
-                #         # print(spike)
-                #     else:
-                #         raise ValueError("message type unknown")
-                # else:
-                #     print("No data in message, breaking")
 
             elif self.heartbeat_socket in socks and self.socket_waits_reply:
                 message = self.heartbeat_socket.recv()
