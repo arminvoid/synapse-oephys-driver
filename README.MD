@@ -1,5 +1,7 @@
 # Synapse Oephys Driver
 
+Synapse connector for the [open-ephys GUI](https://open-ephys.org/gui).
+
 **Run Server**
 ```
 pip install -r requirements.txt

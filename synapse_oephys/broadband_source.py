@@ -29,6 +29,7 @@ class BroadbandSource(BaseNode):
                 async for msg in self.zmq_client.receive_data():
                     res = self.parse_msg(msg)
                     if res:
+                        print(f"channel: {res.samples[0][0]}, num_samples", len(res.samples[0][1]))
                         await self.emit_data(res)
             except Exception as e:
                 self.logger.warn(f"failed to read data: {e}")
