@@ -20,7 +20,13 @@ async def test_zmq_client():
     bs = BroadbandSource(69)
     async for msg in bs.zmq_client.receive_data():
         res = bs.parse_msg(msg)
-        print(f"channel: {res.samples[0][0]}, num_samples", len(res.samples[0][1]))
+        import json
+        print(json.dumps({
+            "channel": res.channel_num,
+            "sample_num": res.sample_num,
+            "message_num": res.message_num,
+            "timestamp": res.timestamp
+        }))
 
 if __name__ == "__main__":
     run()
