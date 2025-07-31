@@ -3,28 +3,30 @@ import logging
 import zmq, json, numpy as np
 from dataclasses import dataclass
 
-from synapse.server.nodes import BaseNode
-from synapse.api.node_pb2 import NodeType
-from synapse.api.nodes.broadband_source_pb2 import BroadbandSourceConfig
-from synapse.server.status import Status
 from synapse.api.datatype_pb2 import BroadbandFrame
+from synapse.api.nodes.broadband_source_pb2 import BroadbandSourceConfig, BroadbandSourceStatus
+from synapse.api.nodes.signal_status_pb2 import SignalStatus, ElectrodeStatus
+from synapse.api.node_pb2 import NodeType, NodeStatus
 from synapse.api.tap_pb2 import TapConnection, TapType
+from synapse.server.status import Status
+from synapse.server.nodes.base import BaseNode
 from synapse_oephys.zmq_client import ZMQClient
 
-NUM_SAMPLES = 928
 NUM_CHANNELS = 16
+LSB_UV = 0.1953125 # chose an arbitary value of 0.195 µV per count
 
 @dataclass
 class OpenEphysMessage:
     message_num: int
     channel_num: int
     sample_num: int
+    num_samples: int
     timestamp: int
     sample_rate: int
     payload: np.ndarray
+
 class BroadbandSource(BaseNode):
     def __init__(self, id):
-        print(f"BroadbandSource __init__")
         super().__init__(id, NodeType.kBroadbandSource)
         self.__config: BroadbandSourceConfig = None
         self.zmq_context = None
@@ -33,7 +35,8 @@ class BroadbandSource(BaseNode):
         self.iface_ip = None
         self.zmq_client = ZMQClient()
         self.last_channel_num = None
-        self.samples = np.zeros((NUM_CHANNELS, NUM_SAMPLES), dtype=np.float32)
+        self.samples = None
+        self.logger.setLevel(logging.INFO) # synapse-science always sets the root logger to DEBUG which is very noisy for us
 
     def config(self):
         c = super().config()
@@ -57,41 +60,43 @@ class BroadbandSource(BaseNode):
                     res = self.parse_msg(msg)
                     if not res:
                         continue
-                    # print(f"res: {res}")
-                    expected_channel = 0 if self.last_channel_num is None else self.last_channel_num + 1
+                    self.logger.debug(f"received message: {res}")
+                    if self.last_channel_num is None:
+                        expected_channel = 0
+                        self.samples = np.zeros((NUM_CHANNELS, res.num_samples), dtype=np.float32)
+                    else:
+                        expected_channel = self.last_channel_num + 1
+
                     if res.channel_num != expected_channel:
                         raise ValueError(f"channel_num {res.channel_num} does not match expected {expected_channel}")
                     self.last_channel_num = expected_channel
                     self.samples[res.channel_num, :] = res.payload
 
                     # if we accumulated all samples, send the frames over tap
-                    # print type of res.channel_num
                     if res.channel_num == NUM_CHANNELS - 1:
+                        num_samples = res.num_samples
+                        self.logger.debug(f"fwding {num_samples} frames")
                         # iterate samples to construct payload indexed by channel_num
-                        for i in range(NUM_SAMPLES):
+                        for i in range(num_samples):
                             # res.timestamp is exact same for all NUM_CHANNEL msgs
                             base_ts_ns = int(res.timestamp * 1e6) # milliseconds to nanoseconds
 
                             # ideally dt = 1e9 / res.sample_rate, but since msgs from open-ephys have ms resolution the next header loses upto 1ms due to truncation
-                            # so we adjust. at sample_rate, NUM_SAMPLES take
-                            required_time_ms = int(NUM_SAMPLES * 1e3 / res.sample_rate)
-                            dt_ns = int(required_time_ms * 1e6 / NUM_SAMPLES)
-
+                            # so we adjust. at sample_rate, res.num_samples take
+                            required_time_ms = int(num_samples * 1e3 / res.sample_rate)
+                            dt_ns = int(required_time_ms * 1e6 / num_samples)
                             frame = BroadbandFrame(
                                 timestamp_ns=base_ts_ns + i * dt_ns,
                                 sequence_number=self.seq_number,
-                                frame_data=self.samples[:, i].astype(np.int32).tolist(),
+                                frame_data=np.rint(self.samples[:, i] / LSB_UV).astype(np.int32).tolist(),
                                 sample_rate_hz=res.sample_rate,
                             )
-                            # print(f"frame_data: {frame.frame_data}")
-                            print(f"sending frame: {frame}")
+                            self.logger.debug(f"sending frame: {frame}")
                             self.zmq_socket.send(frame.SerializeToString())
                             self.seq_number += 1
-                        self.samples = np.zeros((NUM_CHANNELS, NUM_SAMPLES), dtype=np.float32)
                         self.last_channel_num = None
             except Exception as e:
-                # self.logger.warn(f"failed to read data: {e}")
-                print(f"failed to read data: {e}")
+                self.logger.error(f"failed to read data: {e}")
                 await asyncio.sleep(0.01)  # Sleep on error to prevent rapid retries
 
     def parse_msg(self, message: dict) -> OpenEphysMessage:
@@ -108,7 +113,7 @@ class BroadbandSource(BaseNode):
         try:
             envelope, header_json, payload = message
             header = json.loads(header_json)
-            # print(f'header: {header}, payload: {payload}')
+            # print(f'header: {header}')
 
             if header['type'] == 'event' or header['type'] == 'spike':
                 print("event or spike type is not yet supported")
@@ -118,20 +123,17 @@ class BroadbandSource(BaseNode):
 
             message_num, content, timestamp = map(header.get, ('message_num', 'content', 'timestamp'))
             channel_num, num_samples, sample_num, sample_rate = map(content.get, ('channel_num', 'num_samples', 'sample_num', 'sample_rate'))
-            if num_samples != NUM_SAMPLES:
-                # for this prototype, we only work with NUM_SAMPLES samples per channel
-                raise ValueError(f'num_samples {num_samples} does not match expected {NUM_SAMPLES}')
-
             return OpenEphysMessage(
                 message_num=message_num,
                 timestamp=timestamp,
                 channel_num=channel_num,
+                num_samples=num_samples,
                 sample_num=sample_num,
                 sample_rate=int(sample_rate),
                 payload=np.frombuffer(payload, dtype=np.float32)
             )
         except Exception as e:
-            print(f"failed to parse message: {e}")
+            self.logger.error(f"failed to parse message: {e}")
             return None
 
     def stop(self):
@@ -147,15 +149,27 @@ class BroadbandSource(BaseNode):
         return super().stop()
 
     def configure_iface_ip(self, iface_ip):
-        print(f"configuring iface_ip: {iface_ip}")
         self.iface_ip = iface_ip
 
     def tap_connections(self):
         return [
             TapConnection(
-                name="broadband_source_sim",
+                name="open_ephys_connector",
                 endpoint=f"tcp://{self.iface_ip}:{self.port}",
                 message_type="synapse.BroadbandFrame",
                 tap_type=TapType.TAP_TYPE_PRODUCER,
             )
         ]
+
+    def status(self):
+        return NodeStatus(
+            id=self.id,
+            type=self.type,
+            broadband_source=BroadbandSourceStatus(
+                status=SignalStatus(
+                    electrode=ElectrodeStatus(
+                        lsb_uV=LSB_UV,
+                    )
+                )
+            )
+        )

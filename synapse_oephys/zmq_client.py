@@ -7,7 +7,7 @@ import zmq.asyncio
 import numpy as np
 
 class ZMQClient:
-    def __init__(self, app_name="zmq-client", ip="tcp://localhost", port=5556):
+    def __init__(self, app_name="synapse-oephys", ip="tcp://localhost", port=5556):
         self._timer = None
 
         self.context = zmq.asyncio.Context()
@@ -24,6 +24,7 @@ class ZMQClient:
         self.last_heartbeat_time = 0
         self.last_reply_time = time.time()
         self.logger = logging.getLogger(f"{self.__class__.__name__}")
+        self.logger.setLevel(logging.INFO) # synapse-science always sets the root logger to DEBUG which is very noisy for us
 
         self.init_socket()
 

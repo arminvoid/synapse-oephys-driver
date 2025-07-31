@@ -1,10 +1,8 @@
-import asyncio
 from coolname import generate_slug
 from synapse.api.node_pb2 import NodeType
 from synapse.server.entrypoint import main, ENTRY_DEFAULTS
 from synapse.server.nodes import SERVER_NODE_OBJECT_MAP
 from synapse_oephys.broadband_source import BroadbandSource
-from synapse_oephys.zmq_client import ZMQClient
 
 defaults = ENTRY_DEFAULTS.copy()
 defaults["device_serial"] = "oephys-connector"
@@ -31,6 +29,7 @@ async def test_zmq_client():
 if __name__ == "__main__":
     run()
     # try:
+    #     import asyncio
     #     asyncio.run(test_zmq_client())
     # except KeyboardInterrupt:
     #     print("Shutting down...")
